@@ -2,6 +2,7 @@ import mysql from 'mysql2/promise';
 import dbConfig from '../../middleware/dbConfig';
 const { logActivity } = require('../../lib/auditLogger');
 const { invalidate, invalidatePattern, publish } = require('../../lib/cache');
+const { notifyAllCMOs } = require('../../lib/fcmService');
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -67,6 +68,13 @@ export default async function handler(req, res) {
     `, [requestId]);
 
     await connection.commit();
+
+    await notifyAllCMOs(
+      connection,
+      '✅ Emergency Order Received',
+      `Pharmacy #${pharmacyId} confirmed receipt of emergency order #${requestId}. Order complete.`,
+      { request_id: String(requestId), type: 'emergency_received' }
+    ).catch(e => console.error('FCM notify CMO error:', e));
 
     // Invalidate pharmacy stock (new stock added) and the emergency requests list
     invalidate(`stock:${pharmacyId}`, 'emergency_requests:all');

@@ -1,6 +1,7 @@
 import mysql from 'mysql2/promise';
 import dbConfig from '../../middleware/dbConfig';
 const { logActivity } = require('../../lib/auditLogger');
+const { notifyUsers } = require('../../lib/fcmService');
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -22,11 +23,32 @@ export default async function handler(req, res) {
 
     // Update disposal request status to 'request_sent'
     await connection.execute(
-      `UPDATE pharmacy_disposal_request 
+      `UPDATE pharmacy_disposal_request
        SET status = 'request_sent'
        WHERE request_id = ?`,
       [request_id]
     );
+
+    // Fetch pharmacy name for notification
+    const [[disposalReq]] = await connection.execute(
+      `SELECT pharmacy_id FROM pharmacy_disposal_request WHERE request_id = ?`,
+      [request_id]
+    );
+    const pharmacyId = disposalReq?.pharmacy_id;
+
+    // Notify all warehouses registered in push_tokens
+    const [warehouseRows] = await connection.execute(
+      `SELECT DISTINCT user_id FROM push_tokens WHERE user_type = 'warehouse'`
+    );
+    const warehouseIds = warehouseRows.map(r => r.user_id);
+    if (warehouseIds.length > 0) {
+      await notifyUsers(
+        connection, 'warehouse', warehouseIds,
+        '🗑️ New Disposal Request',
+        `A new disposal request #${request_id} has been sent by Pharmacy #${pharmacyId || request_id}. Please collect.`,
+        { request_id: String(request_id), type: 'disposal_request' }
+      ).catch(e => console.error('FCM notify warehouse error:', e));
+    }
 
     await connection.end();
 

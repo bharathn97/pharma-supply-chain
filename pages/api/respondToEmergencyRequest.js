@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import dbConfig from '../../middleware/dbConfig';
+const { notifyUsers } = require('../../lib/fcmService');
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -67,6 +68,17 @@ export default async function handler(req, res) {
 
       // Commit transaction
       await connection.commit();
+
+      const requestingPharmacyId = verifyResult[0].pharmacy_id;
+      await notifyUsers(
+        connection, 'pharmacy', [requestingPharmacyId],
+        action === 'approve' ? '✅ Emergency Order Accepted' : '❌ Emergency Order Declined',
+        action === 'approve'
+          ? `The assigned pharmacy has accepted emergency request #${request_id} and will prepare the stock.`
+          : `The assigned pharmacy has declined emergency request #${request_id}.${remarks ? ' Reason: ' + remarks : ''}`,
+        { request_id: String(request_id), type: 'emergency_response' }
+      ).catch(e => console.error('FCM notify pharmacy error:', e));
+
       await connection.end();
 
       res.status(200).json({

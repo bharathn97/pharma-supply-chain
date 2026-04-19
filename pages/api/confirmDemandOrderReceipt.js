@@ -2,6 +2,7 @@ import mysql from 'mysql2/promise';
 import dbConfig from '../../middleware/dbConfig';
 const { logActivity } = require('../../lib/auditLogger');
 const { invalidate, invalidatePattern, publish } = require('../../lib/cache');
+const { notifyAllCMOs } = require('../../lib/fcmService');
 
 // POST /api/confirmDemandOrderReceipt
 // Body: { request_id, pharmacy_id }
@@ -84,6 +85,13 @@ export default async function handler(req, res) {
     `, [request_id]);
 
     await connection.commit();
+
+    await notifyAllCMOs(
+      connection,
+      '✅ Demand Order Received',
+      `Pharmacy #${pharmacy_id} confirmed receipt of demand order #${request_id}. Order complete.`,
+      { request_id: String(request_id), type: 'demand_received' }
+    ).catch(e => console.error('FCM notify CMO error:', e));
 
     // Invalidate pharmacy stock (new stock added) and the demand requests list
     invalidate(`stock:${pharmacy_id}`, 'demand_requests:all');
